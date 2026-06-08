@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-180.png">
-<title>FlashTap — DALI short-address reader</title>
+<title>FlashTap · EZ address decoder</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
@@ -85,6 +85,12 @@
     pointer-events:auto;
   }
   .aboutbtn:active{transform:scale(.92);}
+  .rangebtn{
+    font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;
+    color:var(--text);border:1px solid var(--line);border-radius:999px;padding:4px 9px;
+    background:transparent;cursor:pointer;pointer-events:auto;
+  }
+  .rangebtn:active{transform:scale(.94);}
 
   /* ---- CAPTURE ZONES ---- */
   .capture{position:relative;flex:1;display:flex;flex-direction:column;min-height:0;}
@@ -212,7 +218,7 @@
   }
   .row .mini.ins{color:var(--green-bright);border-color:rgba(46,224,126,.3);}
   .empty{color:var(--muted);text-align:center;font-size:13px;padding:40px 20px;line-height:1.6;}
-  .sheet-foot{padding:10px 14px 18px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px;}
+  .sheet-foot{padding:10px 14px 18px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:16px;}
   .footrow{display:flex;gap:8px;}
   .copy{
     flex:1;width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
@@ -281,7 +287,8 @@
   <header>
     <div class="brand">FlashTap</div>
     <div style="display:flex;align-items:center;gap:8px;pointer-events:auto;">
-      <div class="mode-pill">DALI short-address reader</div>
+      <div class="mode-pill">EZ address decoder</div>
+      <button class="rangebtn" id="rangeBtn" title="Toggle address numbering" aria-label="Toggle address numbering"></button>
       <button class="aboutbtn" id="aboutBtn" title="About" aria-label="About FlashTap">i</button>
     </div>
   </header>
@@ -353,7 +360,7 @@
   <div class="modal-bg" id="exportBg">
     <div class="modal">
       <h3>Export sweep</h3>
-      <p>Name the file &mdash; often the module or area you swept.</p>
+      <p>Name the file, often the module or area you swept.</p>
       <input class="modal-input" id="exportName" type="text" placeholder="e.g. level-3-east" maxlength="80" autocomplete="off">
       <div class="mbtns" style="margin-top:14px;">
         <button class="mbtn cancel" id="exCancel">Cancel</button>
@@ -379,8 +386,8 @@
   <div class="modal-bg" id="aboutBg">
     <div class="modal">
       <h3>FlashTap</h3>
-      <p style="margin-bottom:6px;">DALI short-address reader<br>Version <span id="aboutVersion"></span></p>
-      <p>Reads a device's short address (0&ndash;63) from its 6-flash green/red charge-status LED sequence. Build a Sweep, then export it as a named text file &mdash; the file is the durable record.</p>
+      <p style="margin-bottom:6px;">EZ address decoder<br>Version <span id="aboutVersion"></span></p>
+      <p>Reads and decodes EZ easy-addressing flash sequences. Tap each green/red flash to build the device's short address. Build a Sweep, then export it as a named text file, which is the durable record.</p>
       <div class="mbtns">
         <button class="mbtn go" id="aboutClose">Close</button>
       </div>
@@ -397,6 +404,24 @@
   let list = [];                              // [{value}]
   let expanded = false;
   let insertContext = null;                  // {at, label} when capturing a missed device for insertion
+
+  /* ---- address numbering: devices report 0-63, but some installs prefer
+     to read/record/export addresses as 1-64. Internally everything stays
+     raw (0-63) — addressBase is purely a display/export offset so the
+     underlying decode and duplicate logic never has to think about it. */
+  const RANGE_KEY = 'flashtap.addressBase';
+  let addressBase = 0;                       // 0 → show 0-63, 1 → show 1-64
+  function loadRange(){
+    try{
+      const raw = localStorage.getItem(RANGE_KEY);
+      addressBase = (raw === '1') ? 1 : 0;
+    }catch(e){ addressBase = 0; }
+  }
+  function saveRange(){
+    try{ localStorage.setItem(RANGE_KEY, String(addressBase)); }catch(e){}
+  }
+  function disp(raw){ return raw + addressBase; }
+  function rangeLabel(){ return addressBase ? '1–64' : '0–63'; }
 
   /* ---- persistence: keep the current Sweep across reload/lock ----
      The file system is the real archive (export to .txt) — this is
@@ -425,6 +450,7 @@
   const dotsEl = $('dots'), valueEl = $('value'), binsub = $('binsub');
   const candidate = $('candidate'), actionbar = $('actionbar'), candCaption = $('candCaption');
   const insertBg = $('insertBg'), insertMsg = $('insertMsg');
+  const rangeBtn = $('rangeBtn');
   const btnSave = $('btnSave'), btnRetry = $('btnRetry');
   const sheet = $('sheet'), peek = $('peek'), listEl = $('list'), foot = $('foot');
   const countEl = $('count'), toast = $('toast');
@@ -489,8 +515,10 @@
       dotsEl.appendChild(d);
     }
     if(active){
-      valueEl.firstChild.nodeValue = bits.length===6 ? String(value()) : value()+'…';
-      binsub.textContent = bits.length===6 ? 'binary '+binStr() : bits.length+' of 6 flashes';
+      // mid-read, show the raw running tally (it isn't a real address yet);
+      // only the completed 6-bit value gets the display offset applied
+      valueEl.firstChild.nodeValue = bits.length===6 ? String(disp(value())) : value()+'…';
+      binsub.textContent = bits.length===6 ? 'binary '+binStr()+' · shown as '+rangeLabel() : bits.length+' of 6 flashes';
     }
     btnSave.disabled = bits.length !== 6;
   }
@@ -510,7 +538,7 @@
     if(!force){
       const dupAt = list.findIndex(e => e.value === v);
       if(dupAt !== -1){
-        modalMsg.innerHTML = '<b>'+v+'</b> is already at position <b>'+(dupAt+1)+'</b>. Save it again?';
+        modalMsg.innerHTML = '<b>'+disp(v)+'</b> is already at position <b>'+(dupAt+1)+'</b>. Save it again?';
         modalBg.classList.add('show');
         return;
       }
@@ -546,7 +574,7 @@
           const realIdx = list.length - last.length + i + 1;
           const c = document.createElement('div');
           c.className='chip';
-          c.innerHTML = '<span class="n">'+realIdx+'</span>&nbsp;→&nbsp;'+e.value;
+          c.innerHTML = '<span class="n">'+realIdx+'</span>&nbsp;→&nbsp;'+disp(e.value);
           peek.appendChild(c);
         });
       }
@@ -567,7 +595,7 @@
       row.innerHTML =
         '<div class="handle" title="Drag to reorder">&#8942;&#8942;</div>'+
         '<div class="idx">'+(i+1)+'</div>'+
-        '<input type="number" min="0" max="63" value="'+e.value+'">'+
+        '<input type="number" min="'+addressBase+'" max="'+(63+addressBase)+'" value="'+disp(e.value)+'">'+
         (isDup ? '<span class="dupflag" title="This address appears more than once in the sweep">Dup</span>' : '')+
         '<div class="mini ins" title="Insert above/below">＋</div>'+
         '<div class="mini del" title="Delete">✕</div>';
@@ -576,12 +604,13 @@
       const inp = row.querySelector('input');
       inp.onchange = () => {
         let n = parseInt(inp.value,10);
-        if(isNaN(n)) n = 0;
-        n = Math.max(0, Math.min(63, n));
-        e.value = n; inp.value = n; renderList();
+        if(isNaN(n)) n = addressBase;
+        n = Math.max(addressBase, Math.min(63+addressBase, n));
+        const raw = n - addressBase;
+        e.value = raw; inp.value = n; renderList();
       };
       row.querySelector('.ins').onclick = () => {
-        insertMsg.innerHTML = 'Read the missed device now &mdash; it will slot in above or below <b>#'+(i+1)+'</b> ('+e.value+') and the sweep will renumber.';
+        insertMsg.innerHTML = 'Read the missed device now. It will slot in above or below <b>#'+(i+1)+'</b> ('+disp(e.value)+') and the sweep will renumber.';
         insertBg.dataset.row = i;
         insertBg.classList.add('show');
       };
@@ -655,7 +684,8 @@
 
   function doExport(name){
     const filename = slugify(name) + '.txt';
-    const txt = list.map(e => e.value).join('\n') + (list.length ? '\n' : '');
+    const txt = '# Addresses shown as ' + rangeLabel().replace('–','-') + '\n' +
+      list.map(e => disp(e.value)).join('\n') + (list.length ? '\n' : '');
     const blob = new Blob([txt], {type:'text/plain'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -782,6 +812,17 @@
       e.preventDefault();
     }
   });
+
+  loadRange();
+  rangeBtn.textContent = rangeLabel();
+  rangeBtn.onclick = () => {
+    addressBase = addressBase ? 0 : 1;
+    saveRange();
+    rangeBtn.textContent = rangeLabel();
+    render();
+    renderList();
+    showToast('Showing addresses as ' + rangeLabel());
+  };
 
   loadSweep();
   render();
