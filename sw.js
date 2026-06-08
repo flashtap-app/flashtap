@@ -1,8 +1,6 @@
-// FlashTap service worker - offline-first cache for a single-purpose tool.
-// Bump CACHE_NAME on any release to force a refresh of cached assets.
-const CACHE_NAME = 'flashtap-v2';
+const CACHE_NAME = 'flashtap-v3';
 const ASSETS = [
-  './index.html',
+  './flashtap.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
