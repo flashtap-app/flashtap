@@ -1,0 +1,17 @@
+{
+  "name": "FlashTap — DALI short-address reader",
+  "short_name": "FlashTap",
+  "description": "Reads DALI short addresses from emergency-driver LED flash sequences and collects them into exportable Sweeps.",
+  "start_url": "./flashtap.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0f12",
+  "theme_color": "#0d0f12",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

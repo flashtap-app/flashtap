@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f12">
+<meta name="description" content="Reads DALI short addresses from emergency-driver LED flash sequences and collects them into exportable Sweeps.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FlashTap">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>FlashTap — DALI short-address reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ---- THEME TOKENS (rebrand by editing these) ---- */
+  :root{
+    --bg:#0d0f12;
+    --panel:#16191e;
+    --panel-2:#1f242b;
+    --text:#eef1f4;
+    --muted:#8a929c;
+    --line:#2a2f37;
+
+    --green:#1f9d57;
+    --green-bright:#2ee07e;
+    --red:#c0392b;
+    --red-bright:#ff5a45;
+
+    --accent:#eef1f4;
+    --ui:"Archivo",system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #15191f 0%, var(--bg) 60%);
+    color:var(--text);
+    font-family:var(--ui);
+    min-height:100vh;
+    overflow:hidden;
+  }
+
+  /* ---- APP SHELL: fills viewport, no device-frame mockup ----
+     Works at phone width, side-docked panel, or full desktop window.
+     Centers and caps width on very large screens so capture zones
+     don't become absurdly wide, but never imposes a device frame. */
+  .app{
+    position:relative;
+    width:100%;
+    height:100vh;
+    height:100dvh;
+    max-width:720px;
+    margin:0 auto;
+    background:var(--bg);
+    display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+
+  /* ---- HEADER ---- */
+  header{
+    z-index:30;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:calc(16px + var(--safe-top)) 18px 10px;
+    pointer-events:none;
+  }
+  .brand{font-weight:800;letter-spacing:.14em;font-size:12px;color:var(--muted);text-transform:uppercase;}
+  .mode-pill{
+    font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;
+    color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 9px;
+    text-transform:uppercase;
+  }
+  .aboutbtn{
+    width:24px;height:24px;border-radius:50%;border:1px solid var(--line);
+    background:transparent;color:var(--muted);font-family:var(--mono);font-weight:800;
+    font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    pointer-events:auto;
+  }
+  .aboutbtn:active{transform:scale(.92);}
+
+  /* ---- CAPTURE ZONES ---- */
+  .capture{position:relative;flex:1;display:flex;flex-direction:column;min-height:0;}
+  .zone{
+    flex:1;position:relative;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    user-select:none;transition:filter .08s ease;
+    overflow:hidden;
+  }
+  .zone .label{
+    font-weight:800;letter-spacing:.22em;font-size:15px;text-transform:uppercase;
+    color:rgba(255,255,255,.55);z-index:2;display:flex;align-items:center;gap:10px;
+  }
+  .keyhint{
+    font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:none;
+    background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.2);border-radius:5px;
+    padding:2px 7px;color:rgba(255,255,255,.7);
+  }
+  .zone.green{background:linear-gradient(180deg,#187a44,#125f35);}
+  .zone.red{background:linear-gradient(0deg,#9c2c20,#7d2319);}
+  .zone .flash{
+    position:absolute;inset:0;opacity:0;z-index:1;
+  }
+  .zone.green .flash{background:var(--green-bright);}
+  .zone.red .flash{background:var(--red-bright);}
+  .zone.flashing .flash{opacity:.9;transition:opacity .04s ease;}
+  .divider{height:2px;background:rgba(0,0,0,.45);}
+
+  /* ---- CANDIDATE CARD (floats over the divide) ---- */
+  .candidate{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(.96);
+    width:min(300px, 84vw);background:rgba(13,15,18,.86);backdrop-filter:blur(10px);
+    border:1px solid var(--line);border-radius:22px;padding:18px 18px 16px;
+    z-index:25;box-shadow:0 20px 50px rgba(0,0,0,.55);
+    opacity:0;pointer-events:none;transition:opacity .18s ease, transform .18s ease;
+    text-align:center;
+  }
+  .candidate.show{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto;}
+  .candidate .caption{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;}
+  .candidate .caption.cancellable{cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
+  .dots{display:flex;gap:9px;justify-content:center;margin-bottom:6px;}
+  .dot{
+    width:30px;height:30px;border-radius:50%;border:2px solid var(--line);
+    background:transparent;cursor:pointer;transition:all .12s ease;position:relative;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .dot .w{font-family:var(--mono);font-size:8px;color:var(--muted);position:absolute;bottom:-15px;}
+  .dot.g{background:var(--green-bright);border-color:var(--green-bright);box-shadow:0 0 12px rgba(46,224,126,.45);}
+  .dot.r{background:var(--red-bright);border-color:var(--red-bright);box-shadow:0 0 12px rgba(255,90,69,.4);}
+  .value{font-family:var(--mono);font-weight:800;font-size:54px;line-height:1;margin:22px 0 4px;letter-spacing:.02em;}
+  .value .sub{display:block;font-size:11px;letter-spacing:.16em;color:var(--muted);font-weight:700;margin-top:8px;}
+
+  /* ---- SAVE / RETRY BAR ---- */
+  .actionbar{
+    position:absolute;left:14px;right:14px;bottom:calc(96px + var(--safe-bottom));z-index:26;
+    display:flex;gap:10px;
+    opacity:0;transform:translateY(10px);pointer-events:none;transition:all .18s ease;
+  }
+  .actionbar.show{opacity:1;transform:translateY(0);pointer-events:auto;}
+  .btn{
+    flex:1;border:none;border-radius:16px;padding:16px 0;cursor:pointer;
+    font-family:var(--ui);font-weight:800;font-size:15px;letter-spacing:.05em;text-transform:uppercase;
+  }
+  .btn.retry{background:var(--panel-2);color:var(--text);border:1px solid var(--line);}
+  .btn.save{background:var(--green-bright);color:#062b16;}
+  .btn.save:disabled{background:var(--panel-2);color:var(--muted);border:1px solid var(--line);cursor:not-allowed;}
+  .btn:active{transform:scale(.97);}
+
+  /* ---- BOTTOM SHEET ---- */
+  .sheet{
+    position:absolute;left:0;right:0;bottom:0;z-index:40;
+    background:var(--panel);border-top:1px solid var(--line);
+    border-radius:22px 22px 0 0;
+    box-shadow:0 -16px 40px rgba(0,0,0,.5);
+    transition:height .26s cubic-bezier(.4,0,.2,1);
+    height:calc(84px + var(--safe-bottom));display:flex;flex-direction:column;
+    padding-bottom:var(--safe-bottom);
+  }
+  .sheet.expanded{height:min(560px, 72vh);}
+  .grab{padding:10px 0 4px;display:flex;justify-content:center;cursor:pointer;}
+  .grab .bar{width:40px;height:5px;border-radius:3px;background:var(--line);}
+  .sheet-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:2px 18px 10px;cursor:pointer;
+  }
+  .sheet-title{font-weight:800;font-size:14px;letter-spacing:.02em;}
+  .count{font-family:var(--mono);font-weight:700;font-size:12px;color:var(--muted);}
+  .list{flex:1;overflow-y:auto;padding:4px 14px 14px;}
+  .row{
+    display:flex;align-items:center;gap:12px;
+    background:var(--panel-2);border:1px solid var(--line);border-radius:14px;
+    padding:12px 12px;margin-bottom:8px;
+    transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .row.dragging{
+    box-shadow:0 10px 30px rgba(0,0,0,.45);border-color:var(--green-bright);
+    position:relative;z-index:5;opacity:.95;
+  }
+  .row .handle{
+    color:var(--muted);font-size:16px;line-height:1;cursor:grab;
+    touch-action:none;padding:4px 2px;letter-spacing:-2px;user-select:none;
+  }
+  .row .handle:active{cursor:grabbing;color:var(--text);}
+  .row .idx{
+    font-family:var(--mono);font-weight:800;font-size:12px;color:var(--muted);
+    min-width:26px;text-align:center;
+  }
+  .row .addr{font-family:var(--mono);font-weight:800;font-size:22px;flex:1;}
+  .row input{
+    width:64px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+    color:var(--text);font-family:var(--mono);font-weight:800;font-size:18px;
+    padding:6px;text-align:center;
+  }
+  .row .mini{
+    background:transparent;border:1px solid var(--line);color:var(--muted);
+    border-radius:9px;width:34px;height:34px;cursor:pointer;font-size:15px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .row .mini:active{transform:scale(.92);}
+  .row .mini.del{color:var(--red-bright);border-color:rgba(255,90,69,.3);}
+  .dupflag{
+    font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.08em;
+    color:var(--red-bright);border:1px solid rgba(255,90,69,.4);background:rgba(255,90,69,.12);
+    border-radius:7px;padding:4px 7px;text-transform:uppercase;
+  }
+  .row .mini.ins{color:var(--green-bright);border-color:rgba(46,224,126,.3);}
+  .empty{color:var(--muted);text-align:center;font-size:13px;padding:40px 20px;line-height:1.6;}
+  .sheet-foot{padding:10px 14px 18px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px;}
+  .footrow{display:flex;gap:8px;}
+  .copy{
+    flex:1;width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+    border-radius:14px;padding:14px;font-family:var(--ui);font-weight:800;font-size:13px;
+    letter-spacing:.05em;text-transform:uppercase;cursor:pointer;
+  }
+  .copy:active{transform:scale(.99);}
+  .copy.primary{background:var(--green-bright);color:#062b16;border:none;}
+  .copy.danger{background:transparent;color:var(--muted);border:1px solid var(--line);font-size:12px;padding:11px;}
+  .modal-input{
+    width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);
+    border-radius:12px;padding:12px 14px;font-family:var(--mono);font-size:14px;
+    text-align:center;
+  }
+  .modal-input:focus{outline:none;border-color:var(--green-bright);}
+  .peek{padding:0 18px;display:flex;gap:8px;overflow-x:hidden;}
+  .peek .chip{
+    font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);
+    background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;white-space:nowrap;
+  }
+  .peek .chip .n{color:var(--muted);}
+
+  /* ---- DUPLICATE MODAL ---- */
+  .modal-bg{
+    position:absolute;inset:0;z-index:70;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;padding:24px;
+    opacity:0;pointer-events:none;transition:opacity .16s ease;
+  }
+  .modal-bg.show{opacity:1;pointer-events:auto;}
+  .modal{
+    background:var(--panel);border:1px solid var(--line);border-radius:20px;
+    padding:22px;width:100%;max-width:360px;text-align:center;
+  }
+  .modal h3{font-size:16px;margin-bottom:8px;}
+  .modal p{color:var(--muted);font-size:13px;line-height:1.5;margin-bottom:18px;}
+  .modal p b{color:var(--text);font-family:var(--mono);}
+  .modal .mbtns{display:flex;gap:10px;}
+  .modal .mbtn{flex:1;border-radius:13px;padding:13px;font-weight:800;font-size:13px;cursor:pointer;border:1px solid var(--line);text-transform:uppercase;letter-spacing:.04em;}
+  .modal .mbtn.cancel{background:var(--panel-2);color:var(--text);}
+  .modal .mbtn.go{background:var(--green-bright);color:#062b16;border:none;}
+
+  .toast{
+    position:absolute;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--text);color:var(--bg);font-weight:700;font-size:12px;
+    padding:10px 16px;border-radius:999px;z-index:80;opacity:0;transition:all .2s ease;letter-spacing:.03em;
+    white-space:nowrap;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  /* Wide / desktop refinement: when there's room, let the shell breathe
+     a little rather than always going edge-to-edge. Still no fixed frame. */
+  @media (min-width: 720px){
+    body{padding:24px;overflow:auto;}
+    .app{
+      height:min(880px, calc(100vh - 48px));
+      border-radius:28px;
+      box-shadow:0 30px 80px rgba(0,0,0,.6), inset 0 0 0 1px var(--line);
+      overflow:hidden;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <header>
+    <div class="brand">FlashTap</div>
+    <div style="display:flex;align-items:center;gap:8px;pointer-events:auto;">
+      <div class="mode-pill">DALI short-address reader</div>
+      <button class="aboutbtn" id="aboutBtn" title="About" aria-label="About FlashTap">i</button>
+    </div>
+  </header>
+
+  <!-- CAPTURE ZONES -->
+  <div class="capture">
+    <div class="zone green" id="zGreen"><span class="label">Green &middot; 1 <kbd class="keyhint">8 / &uarr;</kbd></span><div class="flash"></div></div>
+    <div class="divider"></div>
+    <div class="zone red" id="zRed"><span class="label">Red &middot; 0 <kbd class="keyhint">Space / &darr;</kbd></span><div class="flash"></div></div>
+
+    <!-- CANDIDATE CARD -->
+    <div class="candidate" id="candidate">
+      <div class="caption" id="candCaption">Reading &middot; tap a dot to fix</div>
+      <div class="dots" id="dots"></div>
+      <div class="value" id="value">--<span class="sub" id="binsub"></span></div>
+    </div>
+  </div>
+
+  <!-- SAVE / RETRY -->
+  <div class="actionbar" id="actionbar">
+    <button class="btn retry" id="btnRetry">Retry <kbd class="keyhint">Esc</kbd></button>
+    <button class="btn save" id="btnSave" disabled>Save <kbd class="keyhint">Enter</kbd></button>
+  </div>
+
+  <!-- BOTTOM SHEET -->
+  <div class="sheet" id="sheet">
+    <div class="grab" id="grab"><div class="bar"></div></div>
+    <div class="sheet-head" id="sheetHead">
+      <div class="sheet-title">Sweep</div>
+      <div class="count" id="count">0 addresses</div>
+    </div>
+    <div class="peek" id="peek"></div>
+    <div class="list" id="list" style="display:none"></div>
+    <div class="sheet-foot" id="foot" style="display:none">
+      <div class="footrow">
+        <button class="copy" id="copyBtn">Copy all</button>
+        <button class="copy primary" id="exportBtn">Export &middot; .txt</button>
+      </div>
+      <button class="copy danger" id="newSweepBtn">New sweep</button>
+    </div>
+  </div>
+
+  <!-- DUPLICATE MODAL -->
+  <div class="modal-bg" id="modalBg">
+    <div class="modal">
+      <h3>Duplicate address</h3>
+      <p id="modalMsg"></p>
+      <div class="mbtns">
+        <button class="mbtn cancel" id="mCancel">Cancel</button>
+        <button class="mbtn go" id="mGo">Save anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- INSERT POSITION MODAL -->
+  <div class="modal-bg" id="insertBg">
+    <div class="modal">
+      <h3>Insert missed device</h3>
+      <p id="insertMsg"></p>
+      <div class="mbtns">
+        <button class="mbtn cancel" id="insAbove">Insert above</button>
+        <button class="mbtn go" id="insBelow">Insert below</button>
+      </div>
+      <button class="mbtn cancel" id="insCancel" style="margin-top:8px;width:100%;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- EXPORT (NAME FILE) MODAL -->
+  <div class="modal-bg" id="exportBg">
+    <div class="modal">
+      <h3>Export sweep</h3>
+      <p>Name the file &mdash; often the module or area you swept.</p>
+      <input class="modal-input" id="exportName" type="text" placeholder="e.g. level-3-east" maxlength="80" autocomplete="off">
+      <div class="mbtns" style="margin-top:14px;">
+        <button class="mbtn cancel" id="exCancel">Cancel</button>
+        <button class="mbtn go" id="exGo">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEW SWEEP CONFIRM MODAL -->
+  <div class="modal-bg" id="newSweepBg">
+    <div class="modal">
+      <h3>Start a new sweep?</h3>
+      <p id="newSweepMsg"></p>
+      <div class="mbtns" style="flex-direction:column;gap:8px;">
+        <button class="mbtn go" id="nsExport">Export first</button>
+        <button class="mbtn cancel" id="nsStart" style="color:var(--red-bright);">Start new (discard)</button>
+        <button class="mbtn cancel" id="nsCancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ABOUT MODAL -->
+  <div class="modal-bg" id="aboutBg">
+    <div class="modal">
+      <h3>FlashTap</h3>
+      <p style="margin-bottom:6px;">DALI short-address reader<br>Version <span id="aboutVersion"></span></p>
+      <p>Reads a device's short address (0&ndash;63) from its 6-flash green/red charge-status LED sequence. Build a Sweep, then export it as a named text file &mdash; the file is the durable record.</p>
+      <div class="mbtns">
+        <button class="mbtn go" id="aboutClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(() => {
+  const WEIGHTS = [32,16,8,4,2,1];           // MSB first
+  let bits = [];                              // entered bits, MSB first
+  let list = [];                              // [{value}]
+  let expanded = false;
+  let insertContext = null;                  // {at, label} when capturing a missed device for insertion
+
+  /* ---- persistence: keep the current Sweep across reload/lock ----
+     The file system is the real archive (export to .txt) — this is
+     just so a session survives a phone lock or accidental reload.
+     iOS can evict PWA storage after long disuse, which is exactly why
+     export remains the durable record; this is a convenience layer. */
+  const STORAGE_KEY = 'flashtap.sweep.v1';
+  function saveSweep(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }catch(e){}
+  }
+  function loadSweep(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){
+        const parsed = JSON.parse(raw);
+        if(Array.isArray(parsed)){
+          list = parsed
+            .map(e => ({ value: Math.max(0, Math.min(63, parseInt(e && e.value, 10) || 0)) }))
+            .filter(e => Number.isFinite(e.value));
+        }
+      }
+    }catch(e){ list = []; }
+  }
+
+  const $ = id => document.getElementById(id);
+  const dotsEl = $('dots'), valueEl = $('value'), binsub = $('binsub');
+  const candidate = $('candidate'), actionbar = $('actionbar'), candCaption = $('candCaption');
+  const insertBg = $('insertBg'), insertMsg = $('insertMsg');
+  const btnSave = $('btnSave'), btnRetry = $('btnRetry');
+  const sheet = $('sheet'), peek = $('peek'), listEl = $('list'), foot = $('foot');
+  const countEl = $('count'), toast = $('toast');
+  const modalBg = $('modalBg'), modalMsg = $('modalMsg');
+  const exportBg = $('exportBg'), newSweepBg = $('newSweepBg'), aboutBg = $('aboutBg');
+
+  /* ---- audio feedback (tone per colour) ---- */
+  let actx;
+  function tone(freq){
+    try{
+      actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.frequency.value = freq; o.type='sine';
+      o.connect(g); g.connect(actx.destination);
+      g.gain.setValueAtTime(.0001, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.18, actx.currentTime+.01);
+      g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime+.12);
+      o.start(); o.stop(actx.currentTime+.13);
+    }catch(e){}
+  }
+
+  function value(){ return bits.reduce((s,b,i)=> s + (b? WEIGHTS[i]:0), 0); }
+  function binStr(){ return bits.map(b=>b).join(''); }
+
+  function flashZone(el){
+    el.classList.add('flashing');
+    setTimeout(()=>el.classList.remove('flashing'), 70);
+  }
+
+  function tap(bit, zoneEl, freq){
+    if(bits.length >= 6) return;
+    bits.push(bit);
+    flashZone(zoneEl);
+    tone(freq);
+    render();
+  }
+
+  function render(){
+    const active = bits.length > 0;
+    candidate.classList.toggle('show', active);
+    actionbar.classList.toggle('show', active);
+    candCaption.textContent = insertContext
+      ? 'Inserting ' + insertContext.label + ' · read the missed device · tap to cancel'
+      : 'Reading · tap a dot to fix';
+    candCaption.classList.toggle('cancellable', !!insertContext);
+    candCaption.onclick = insertContext ? cancelInsert : null;
+    btnSave.textContent = '';
+    btnSave.appendChild(document.createTextNode(insertContext ? 'Slot in ' : 'Save '));
+    const kbd = document.createElement('kbd');
+    kbd.className = 'keyhint'; kbd.textContent = 'Enter';
+    btnSave.appendChild(kbd);
+
+    // dots
+    dotsEl.innerHTML = '';
+    for(let i=0;i<6;i++){
+      const d = document.createElement('div');
+      d.className = 'dot' + (bits[i]===1?' g':bits[i]===0?' r':'');
+      d.innerHTML = '<span class="w">'+WEIGHTS[i]+'</span>';
+      if(i < bits.length){
+        d.onclick = () => { bits[i] = bits[i]?0:1; render(); };
+      }
+      dotsEl.appendChild(d);
+    }
+    if(active){
+      valueEl.firstChild.nodeValue = bits.length===6 ? String(value()) : value()+'…';
+      binsub.textContent = bits.length===6 ? 'binary '+binStr() : bits.length+' of 6 flashes';
+    }
+    btnSave.disabled = bits.length !== 6;
+  }
+
+  function clearCandidate(){ bits = []; render(); }
+
+  function cancelInsert(){
+    if(!insertContext) return;
+    insertContext = null;
+    clearCandidate();
+    toggleSheet(true);
+    showToast('Insert cancelled');
+  }
+
+  function doSave(force){
+    const v = value();
+    if(!force){
+      const dupAt = list.findIndex(e => e.value === v);
+      if(dupAt !== -1){
+        modalMsg.innerHTML = '<b>'+v+'</b> is already at position <b>'+(dupAt+1)+'</b>. Save it again?';
+        modalBg.classList.add('show');
+        return;
+      }
+    }
+    if(insertContext){
+      const at = Math.max(0, Math.min(list.length, insertContext.at));
+      list.splice(at, 0, {value:v});
+      const pos = at + 1;
+      insertContext = null;
+      clearCandidate();
+      renderList();
+      toggleSheet(true);
+      showToast('Slotted in at #'+pos);
+    } else {
+      list.push({value:v});
+      clearCandidate();
+      renderList();
+      showToast('Saved · #'+list.length);
+    }
+  }
+
+  function renderList(){
+    saveSweep();
+    countEl.textContent = list.length + (list.length===1?' address':' addresses');
+    // peek (collapsed): last few
+    peek.innerHTML = '';
+    if(!expanded){
+      const last = list.slice(-3);
+      if(last.length===0){
+        peek.innerHTML = '<div class="chip" style="color:var(--muted)">Tap green / red to read a device</div>';
+      } else {
+        last.forEach((e,i)=>{
+          const realIdx = list.length - last.length + i + 1;
+          const c = document.createElement('div');
+          c.className='chip';
+          c.innerHTML = '<span class="n">'+realIdx+'</span>&nbsp;→&nbsp;'+e.value;
+          peek.appendChild(c);
+        });
+      }
+    }
+    // full list (expanded)
+    listEl.innerHTML = '';
+    if(list.length===0){
+      listEl.innerHTML = '<div class="empty">No addresses yet.<br>Watch the LED, tap green or red for each flash, then Save.</div>';
+    }
+    // always-on duplicate flag: count how many times each value occurs
+    const counts = {};
+    list.forEach(e => { counts[e.value] = (counts[e.value]||0) + 1; });
+
+    list.forEach((e,i)=>{
+      const row = document.createElement('div'); row.className='row';
+      const isDup = counts[e.value] > 1;
+      row.dataset.index = i;
+      row.innerHTML =
+        '<div class="handle" title="Drag to reorder">&#8942;&#8942;</div>'+
+        '<div class="idx">'+(i+1)+'</div>'+
+        '<input type="number" min="0" max="63" value="'+e.value+'">'+
+        (isDup ? '<span class="dupflag" title="This address appears more than once in the sweep">Dup</span>' : '')+
+        '<div class="mini ins" title="Insert above/below">＋</div>'+
+        '<div class="mini del" title="Delete">✕</div>';
+      const handle = row.querySelector('.handle');
+      handle.addEventListener('pointerdown', (e) => startDrag(e, row));
+      const inp = row.querySelector('input');
+      inp.onchange = () => {
+        let n = parseInt(inp.value,10);
+        if(isNaN(n)) n = 0;
+        n = Math.max(0, Math.min(63, n));
+        e.value = n; inp.value = n; renderList();
+      };
+      row.querySelector('.ins').onclick = () => {
+        insertMsg.innerHTML = 'Read the missed device now &mdash; it will slot in above or below <b>#'+(i+1)+'</b> ('+e.value+') and the sweep will renumber.';
+        insertBg.dataset.row = i;
+        insertBg.classList.add('show');
+      };
+      row.querySelector('.del').onclick = () => {
+        list.splice(i,1);                  // delete + renumber
+        renderList();
+      };
+      listEl.appendChild(row);
+    });
+  }
+
+  /* ---- drag-to-reorder: per-row handle, not whole-row drag ----
+     The list order is the engineer's physical walking route — reordering
+     lets the exported sequence match how graphics get dropped at the desk. */
+  let dragIndex = null;
+  function startDrag(e, row){
+    e.preventDefault();
+    dragIndex = parseInt(row.dataset.index, 10);
+    if(isNaN(dragIndex)) return;
+    const handle = e.currentTarget;
+    try{ handle.setPointerCapture(e.pointerId); }catch(err){}
+    row.classList.add('dragging');
+
+    function onMove(ev){
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const targetRow = el && el.closest && el.closest('.row');
+      if(!targetRow) return;
+      const targetIndex = parseInt(targetRow.dataset.index, 10);
+      if(isNaN(targetIndex) || targetIndex === dragIndex) return;
+      const [moved] = list.splice(dragIndex, 1);
+      list.splice(targetIndex, 0, moved);
+      dragIndex = targetIndex;
+      renderList();
+      const newRow = listEl.querySelector('.row[data-index="'+dragIndex+'"]');
+      if(newRow) newRow.classList.add('dragging');
+    }
+    function onUp(ev){
+      try{ handle.releasePointerCapture(ev.pointerId); }catch(err){}
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      const draggedRow = listEl.querySelector('.row.dragging');
+      if(draggedRow) draggedRow.classList.remove('dragging');
+      dragIndex = null;
+      saveSweep();
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  }
+
+  function toggleSheet(force){
+    expanded = force!==undefined ? force : !expanded;
+    sheet.classList.toggle('expanded', expanded);
+    listEl.style.display = expanded?'block':'none';
+    foot.style.display = expanded?'block':'none';
+    peek.style.display = expanded?'none':'flex';
+    renderList();
+  }
+
+  /* ---- export: named plain-text file, one address per line ----
+     The file system is the archive; this is the durable record that
+     survives iOS storage eviction. */
+  const APP_VERSION = '0.2';
+  let clearAfterExport = false;
+
+  function slugify(name){
+    const s = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return s || 'sweep';
+  }
+
+  function doExport(name){
+    const filename = slugify(name) + '.txt';
+    const txt = list.map(e => e.value).join('\n') + (list.length ? '\n' : '');
+    const blob = new Blob([txt], {type:'text/plain'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+    showToast('Exported ' + filename);
+    if(clearAfterExport){
+      clearAfterExport = false;
+      list = []; clearCandidate(); renderList();
+      showToast('New sweep started');
+    }
+  }
+
+  function openExportModal(){
+    $('exportName').value = '';
+    exportBg.classList.add('show');
+    setTimeout(()=>$('exportName').focus(), 50);
+  }
+
+  function doNewSweep(){
+    if(list.length === 0){
+      list = []; clearCandidate(); renderList();
+      showToast('New sweep started');
+      return;
+    }
+    $('newSweepMsg').innerHTML = 'This clears the current <b>'+list.length+'</b> '+(list.length===1?'address':'addresses')+'. Export first to keep a copy.';
+    newSweepBg.classList.add('show');
+  }
+
+  let toastT;
+  function showToast(msg){
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(()=>toast.classList.remove('show'), 1400);
+  }
+
+  /* ---- wire up ---- */
+  $('zGreen').onclick = () => tap(1, $('zGreen'), 660);
+  $('zRed').onclick   = () => tap(0, $('zRed'), 330);
+  btnRetry.onclick = () => {
+    if(bits.length > 0) clearCandidate();
+    else if(insertContext) cancelInsert();
+  };
+  btnSave.onclick = () => doSave(false);
+  $('mCancel').onclick = () => modalBg.classList.remove('show');
+  $('mGo').onclick = () => { modalBg.classList.remove('show'); doSave(true); };
+  $('grab').onclick = () => toggleSheet();
+  $('sheetHead').onclick = () => toggleSheet();
+  $('copyBtn').onclick = () => {
+    const txt = list.map(e=>e.value).join('\n');
+    navigator.clipboard?.writeText(txt).then(
+      ()=>showToast('Copied '+list.length+' addresses'),
+      ()=>showToast('Copy not allowed in this view')
+    );
+  };
+
+  /* ---- insert above/below: opens capture screen for the missed device ---- */
+  function startInsert(position){
+    const i = parseInt(insertBg.dataset.row, 10);
+    insertBg.classList.remove('show');
+    const at = position === 'above' ? i : i + 1;
+    insertContext = { at, label: position + ' #' + (i+1) };
+    toggleSheet(false);
+    clearCandidate();
+  }
+  $('insAbove').onclick = () => startInsert('above');
+  $('insBelow').onclick = () => startInsert('below');
+  $('insCancel').onclick = () => insertBg.classList.remove('show');
+
+  /* ---- export modal ---- */
+  $('exportBtn').onclick = () => { clearAfterExport = false; openExportModal(); };
+  $('exCancel').onclick = () => { clearAfterExport = false; exportBg.classList.remove('show'); };
+  $('exGo').onclick = () => {
+    const name = $('exportName').value;
+    exportBg.classList.remove('show');
+    doExport(name || 'sweep');
+  };
+  $('exportName').addEventListener('keydown', (e) => {
+    if(e.key === 'Enter'){ e.preventDefault(); $('exGo').click(); }
+    else if(e.key === 'Escape'){ e.preventDefault(); $('exCancel').click(); }
+    e.stopPropagation();
+  });
+
+  /* ---- new sweep ---- */
+  $('newSweepBtn').onclick = doNewSweep;
+  $('nsCancel').onclick = () => newSweepBg.classList.remove('show');
+  $('nsStart').onclick = () => {
+    newSweepBg.classList.remove('show');
+    list = []; clearCandidate(); renderList();
+    showToast('New sweep started');
+  };
+  $('nsExport').onclick = () => {
+    newSweepBg.classList.remove('show');
+    clearAfterExport = true;
+    openExportModal();
+  };
+
+  /* ---- about ---- */
+  $('aboutVersion').textContent = APP_VERSION;
+  $('aboutBtn').onclick = () => aboutBg.classList.add('show');
+  $('aboutClose').onclick = () => aboutBg.classList.remove('show');
+
+  /* ---- desktop keyboard: upper=green, lower=red ---- */
+  document.addEventListener('keydown', (e) => {
+    const openOverlay = [modalBg, exportBg, newSweepBg, aboutBg, insertBg].find(m => m.classList.contains('show'));
+    if(openOverlay){
+      if(e.key==='Escape' && e.target.tagName !== 'INPUT'){ openOverlay.classList.remove('show'); e.preventDefault(); }
+      return;
+    }
+    // ignore when typing in the list's number inputs
+    if(e.target && e.target.tagName === 'INPUT') return;
+
+    const k = e.key;
+    if(k === '8' || k === 'ArrowUp'){            // GREEN (1)
+      tap(1, $('zGreen'), 660); e.preventDefault();
+    } else if(k === ' ' || k === 'ArrowDown'){   // RED (0)
+      tap(0, $('zRed'), 330); e.preventDefault();
+    } else if(k === 'Enter'){                     // SAVE
+      if(bits.length === 6) doSave(false); e.preventDefault();
+    } else if(k === 'Escape'){                     // RETRY (or cancel insert if nothing entered)
+      if(bits.length > 0) clearCandidate();
+      else if(insertContext) cancelInsert();
+      e.preventDefault();
+    }
+  });
+
+  loadSweep();
+  render();
+  renderList();
+  if(list.length) showToast('Restored sweep · '+list.length+(list.length===1?' address':' addresses'));
+
+  /* ---- PWA: register service worker for offline + installability ----
+     Registration is relative, so this works whatever sub-path the app
+     is served from. Runs over http(s) only — file:// pages can't host
+     service workers, which is expected during local preview. */
+  if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(()=>{});
+    });
+  }
+})();
+</script>
+</body>
+</html>
