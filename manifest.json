@@ -2,7 +2,7 @@
   "name": "FlashTap · EZ address decoder",
   "short_name": "FlashTap",
   "description": "Reads and decodes EZ easy-addressing flash sequences from emergency-driver LEDs and collects them into exportable Sweeps.",
-  "start_url": "./flashtap.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
