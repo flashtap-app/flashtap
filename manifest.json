@@ -1,7 +1,7 @@
 {
-  "name": "FlashTap — DALI short-address reader",
+  "name": "FlashTap · EZ address decoder",
   "short_name": "FlashTap",
-  "description": "Reads DALI short addresses from emergency-driver LED flash sequences and collects them into exportable Sweeps.",
+  "description": "Reads and decodes EZ easy-addressing flash sequences from emergency-driver LEDs and collects them into exportable Sweeps.",
   "start_url": "./flashtap.html",
   "scope": "./",
   "display": "standalone",
