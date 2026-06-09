@@ -227,7 +227,7 @@
   }
   .copy:active{transform:scale(.99);}
   .copy.primary{background:var(--green-bright);color:#062b16;border:none;}
-  .copy.danger{background:transparent;color:var(--muted);border:1px solid var(--line);font-size:12px;padding:11px;}
+  .copy.danger{background:transparent;color:var(--muted);border:1px solid var(--line);font-size:12px;padding:11px;margin-top:8px;}
   .modal-input{
     width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);
     border-radius:12px;padding:12px 14px;font-family:var(--mono);font-size:14px;
@@ -490,8 +490,8 @@
 
   function render(){
     const active = bits.length > 0;
-    candidate.classList.toggle('show', active);
-    actionbar.classList.toggle('show', active);
+    candidate.classList.toggle('show', bits.length === 6); // card only at complete read; mid-read it covers the tap zones
+    actionbar.classList.toggle('show', active);             // retry bar visible from first tap so they can abort
     candCaption.textContent = insertContext
       ? 'Inserting ' + insertContext.label + ' · read the missed device · tap to cancel'
       : 'Reading · tap a dot to fix';
@@ -736,7 +736,8 @@
   $('grab').onclick = () => toggleSheet();
   $('sheetHead').onclick = () => toggleSheet();
   $('copyBtn').onclick = () => {
-    const txt = list.map(e=>e.value).join('\n');
+    const txt = '# Addresses shown as ' + rangeLabel().replace('–','-') + '\n' +
+      list.map(e => disp(e.value)).join('\n');
     navigator.clipboard?.writeText(txt).then(
       ()=>showToast('Copied '+list.length+' addresses'),
       ()=>showToast('Copy not allowed in this view')
