@@ -1,4 +1,4 @@
-const CACHE_NAME = 'flashtap-v4';
+const CACHE_NAME = 'flashtap-v5';
 const ASSETS = [
   './index.html',
   './manifest.json',
@@ -6,6 +6,7 @@ const ASSETS = [
   './icon-512.png',
   './icon-180.png'
 ];
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -13,6 +14,7 @@ self.addEventListener('install', (event) => {
       .then(() => self.skipWaiting())
   );
 });
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((names) =>
@@ -20,8 +22,18 @@ self.addEventListener('activate', (event) => {
     ).then(() => self.clients.claim())
   );
 });
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  // Serve cached index.html for all page navigations (fixes iOS PWA redirect error)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      caches.match('./index.html').then((cached) => cached || fetch(event.request))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
